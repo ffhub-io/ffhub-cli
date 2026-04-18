@@ -65,7 +65,8 @@ async function main() {
   if (args[0] === 'whoami') {
     const apiKey = requireApiKey();
     const me = await getMe(apiKey);
-    console.log(`\n  User ID:  ${me.user_id}`);
+    console.log(`\n  Email:    ${me.email}`);
+    console.log(`  User ID:  ${me.user_id}`);
     console.log(`  Credits:  ${me.remaining_credits}`);
     console.log('');
     return;

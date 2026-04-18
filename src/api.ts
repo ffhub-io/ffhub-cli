@@ -119,7 +119,7 @@ async function streamToBuffer(
 }
 
 /** 获取当前用户信息 */
-export async function getMe(apiKey: string): Promise<{ user_id: string; remaining_credits: number }> {
+export async function getMe(apiKey: string): Promise<{ user_id: string; email: string; remaining_credits: number }> {
   const res = await fetch(`${API_BASE}/v1/me`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -129,7 +129,7 @@ export async function getMe(apiKey: string): Promise<{ user_id: string; remainin
     throw new Error((body as any).message || `Failed: HTTP ${res.status}`);
   }
 
-  return (await res.json()) as { user_id: string; remaining_credits: number };
+  return (await res.json()) as { user_id: string; email: string; remaining_credits: number };
 }
 
 /** 查询任务列表 */
