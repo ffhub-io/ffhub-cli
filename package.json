@@ -1,0 +1,42 @@
+{
+  "name": "ffhub",
+  "version": "1.0.0",
+  "description": "Cloud FFmpeg CLI — process video/audio files via FFHub.io API",
+  "type": "module",
+  "bin": {
+    "ffhub": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ffmpeg",
+    "video",
+    "audio",
+    "transcode",
+    "compress",
+    "convert",
+    "cloud",
+    "cli",
+    "ffhub"
+  ],
+  "author": "FFHub.io",
+  "license": "MIT",
+  "homepage": "https://ffhub.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ffhub-io/ffhub-cli"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}
