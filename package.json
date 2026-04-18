@@ -32,6 +32,9 @@
     "type": "git",
     "url": "https://github.com/ffhub-io/ffhub-cli"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   },
