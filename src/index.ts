@@ -1,9 +1,9 @@
 import { existsSync } from 'fs';
 import { resolve } from 'path';
-import { createTask, formatSize, getTask, listTasks, uploadFile, waitForTask } from './api.js';
+import { createTask, formatSize, getMe, getTask, listTasks, uploadFile, waitForTask } from './api.js';
 import { getApiKey, loadConfig, saveConfig } from './config.js';
 
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 
 const HELP = `
   ffhub - Cloud FFmpeg CLI (v${VERSION})
@@ -11,6 +11,7 @@ const HELP = `
 
   Usage:
     ffhub [ffmpeg args]           Run an FFmpeg command in the cloud
+    ffhub whoami                  Show current user and credits
     ffhub list [--status=X]       List recent tasks (default: 10)
     ffhub status <task_id>        Check task status
     ffhub config <api_key>        Save API key
@@ -57,6 +58,16 @@ async function main() {
     }
     saveConfig({ api_key: args[1] });
     console.log('API key saved to ~/.ffhub/config.json');
+    return;
+  }
+
+  // ffhub whoami
+  if (args[0] === 'whoami') {
+    const apiKey = requireApiKey();
+    const me = await getMe(apiKey);
+    console.log(`\n  User ID:  ${me.user_id}`);
+    console.log(`  Credits:  ${me.remaining_credits}`);
+    console.log('');
     return;
   }
 

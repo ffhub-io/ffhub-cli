@@ -118,6 +118,20 @@ async function streamToBuffer(
   return Buffer.concat(chunks);
 }
 
+/** 获取当前用户信息 */
+export async function getMe(apiKey: string): Promise<{ user_id: string; remaining_credits: number }> {
+  const res = await fetch(`${API_BASE}/v1/me`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as any).message || `Failed: HTTP ${res.status}`);
+  }
+
+  return (await res.json()) as { user_id: string; remaining_credits: number };
+}
+
 /** 查询任务列表 */
 export async function listTasks(
   apiKey: string,
