@@ -3,7 +3,7 @@ import { resolve } from 'path';
 import { createTask, formatSize, getTask, listTasks, uploadFile, waitForTask } from './api.js';
 import { getApiKey, loadConfig, saveConfig } from './config.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 
 const HELP = `
   ffhub - Cloud FFmpeg CLI (v${VERSION})
@@ -166,6 +166,18 @@ function printTaskResult(task: any) {
     if (task.total_elapsed) {
       console.log(`  Total time: ${task.total_elapsed}s`);
     }
+
+    // 下载提示
+    console.log('');
+    console.log('  Download:');
+    if (process.platform === 'win32') {
+      console.log('    curl -O <url>');
+      console.log('    Invoke-WebRequest -Uri <url> -OutFile <filename>');
+    } else {
+      console.log('    curl -O <url>');
+      console.log('    wget <url>');
+    }
+    console.log('    or open the URL in your browser');
   } else if (task.status === 'failed') {
     console.error(`\n  Failed: ${task.error || 'unknown error'}`);
     process.exit(1);
