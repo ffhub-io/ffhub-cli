@@ -118,6 +118,26 @@ async function streamToBuffer(
   return Buffer.concat(chunks);
 }
 
+/** 查询任务列表 */
+export async function listTasks(
+  apiKey: string,
+  limit = 10,
+  status?: string
+): Promise<{ total: number; tasks: TaskResult[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (status) params.set('status', status);
+
+  const res = await fetch(`${API_BASE}/v1/tasks?${params}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to list tasks: HTTP ${res.status}`);
+  }
+
+  return (await res.json()) as { total: number; tasks: TaskResult[] };
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
