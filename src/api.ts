@@ -42,9 +42,15 @@ export async function createTask(
   return data.task_id;
 }
 
-/** 查询任务状态 */
-export async function getTask(taskId: string): Promise<TaskResult> {
-  const res = await fetch(`${API_BASE}/v1/tasks/${taskId}`);
+/** 查询任务状态
+ *
+ * 后端 GET /v1/tasks/:id 目前为了兼容老 CLI 没强制 token，未来版本会切到必须鉴权。
+ * CLI 这边主动带 token，提前对齐，未来切换时无感升级。
+ */
+export async function getTask(apiKey: string, taskId: string): Promise<TaskResult> {
+  const res = await fetch(`${API_BASE}/v1/tasks/${taskId}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
   if (!res.ok) {
     throw new Error(`查询任务失败: HTTP ${res.status}`);
   }
@@ -53,12 +59,13 @@ export async function getTask(taskId: string): Promise<TaskResult> {
 
 /** 轮询等待任务完成 */
 export async function waitForTask(
+  apiKey: string,
   taskId: string,
   onProgress?: (progress: number, status: string) => void
 ): Promise<TaskResult> {
   const maxAttempts = 360; // 最多等 30 分钟
   for (let i = 0; i < maxAttempts; i++) {
-    const task = await getTask(taskId);
+    const task = await getTask(apiKey, taskId);
     onProgress?.(task.progress, task.status);
 
     if (task.status === 'completed' || task.status === 'failed') {

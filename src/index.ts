@@ -92,7 +92,8 @@ async function main() {
       console.error('Please specify a task ID: ffhub status <task_id>');
       process.exit(1);
     }
-    const task = await getTask(args[1]);
+    const apiKey = requireApiKey();
+    const task = await getTask(apiKey, args[1]);
     printTaskResult(task);
     return;
   }
@@ -113,7 +114,7 @@ async function main() {
 
   // 等待完成
   let lastProgress = -1;
-  const task = await waitForTask(taskId, (progress, status) => {
+  const task = await waitForTask(apiKey, taskId, (progress, status) => {
     if (progress !== lastProgress) {
       lastProgress = progress;
       process.stdout.write(`\r  Progress: ${progress}% [${status}]`);
