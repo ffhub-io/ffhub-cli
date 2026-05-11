@@ -1,0 +1,64 @@
+name: Publish to npm
+
+# 触发：推到 main 就跑。版本号变了才发布，没变就跳过——
+# 这是 single source of truth：package.json.version 是发布信号。
+# 想发布就 bump version + push；不想发布就不动 version。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 也允许手动触发
+
+# 同分支并发跑可能撞 npm publish（一个还在跑另一个就来了），互相覆盖很难调
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance（如果未来开 --provenance 用）
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Check version vs npm registry
+        id: check
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          NPM_VERSION=$(npm view ffhub version 2>/dev/null || echo "0.0.0")
+          echo "package.json: $PKG_VERSION"
+          echo "npm registry: $NPM_VERSION"
+          if [ "$PKG_VERSION" != "$NPM_VERSION" ]; then
+            echo "publish=true" >> $GITHUB_OUTPUT
+            echo "version=$PKG_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "publish=false" >> $GITHUB_OUTPUT
+            echo "Same version already on npm, skipping publish."
+          fi
+
+      - name: Publish to npm
+        if: steps.check.outputs.publish == 'true'
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.check.outputs.publish }}" = "true" ]; then
+            echo "✅ Published ffhub@${{ steps.check.outputs.version }} to npm" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ No version change, skipped publish" >> $GITHUB_STEP_SUMMARY
+          fi
