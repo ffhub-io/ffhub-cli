@@ -2,7 +2,6 @@ import { createReadStream, statSync } from 'fs';
 import { basename } from 'path';
 
 const API_BASE = 'https://api.ffhub.io';
-const FILES_API_BASE = 'https://files-api.ffhub.io';
 
 export interface TaskResult {
   task_id: string;
@@ -77,52 +76,94 @@ export async function waitForTask(
   throw new Error('任务超时（30 分钟）');
 }
 
-/** 上传本地文件 */
+/** 上传本地文件
+ *
+ * 两步流程：
+ *   1. POST /v1/uploads/sign 拿一次性 presigned PUT URL
+ *   2. fetch PUT 直传 R2，body 是 Node Readable stream，文件不全部进内存
+ *
+ * 替代了老的 files-api.ffhub.io multipart 路径，那条路径在 Cloudflare
+ * Workers 上有 500MB body / 128MB 内存上限。新路径上限是 R2 单 PUT 5GB。
+ */
 export async function uploadFile(
   apiKey: string,
   filePath: string
 ): Promise<string> {
   const filename = basename(filePath);
   const stat = statSync(filePath);
-  const stream = createReadStream(filePath);
+  const contentType = inferContentType(filename);
 
-  // 构造 multipart/form-data（使用 Node.js 内置能力）
-  const formData = new FormData();
-  const blob = new Blob([await streamToBuffer(stream)], {
-    type: 'application/octet-stream',
-  });
-  formData.append('file', blob, filename);
-
-  const res = await fetch(`${FILES_API_BASE}/api/upload/file`, {
+  // 1. 签名
+  const signRes = await fetch(`${API_BASE}/v1/uploads/sign`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
     },
-    body: formData,
+    body: JSON.stringify({
+      filename,
+      size: stat.size,
+      content_type: contentType,
+    }),
   });
+  if (!signRes.ok) {
+    const body = (await signRes.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message || `签名失败: HTTP ${signRes.status}`);
+  }
+  const signed = (await signRes.json()) as {
+    upload_url: string;
+    public_url: string;
+    content_type: string;
+  };
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(
-      (body as any).message || `上传失败: HTTP ${res.status}`
-    );
+  // 2. PUT 直传 R2。Node 18+ fetch 接受 ReadableStream body，不会 buffer 全文件。
+  const putRes = await fetch(signed.upload_url, {
+    method: 'PUT',
+    // Content-Type 必须跟签名时一致，R2 才认。
+    headers: {
+      'Content-Type': signed.content_type,
+      'Content-Length': String(stat.size),
+    },
+    body: createReadStream(filePath) as unknown as BodyInit,
+    // streaming body 需要显式声明 duplex（HTTP 标准要求，Node fetch 跟随）
+    duplex: 'half',
+  } as RequestInit & { duplex: 'half' });
+
+  if (!putRes.ok) {
+    throw new Error(`上传失败: HTTP ${putRes.status}`);
   }
 
-  const data = (await res.json()) as { url: string; size: number };
   console.log(
-    `  已上传: ${filename} (${formatSize(stat.size)}) → ${data.url}`
+    `  已上传: ${filename} (${formatSize(stat.size)}) → ${signed.public_url}`
   );
-  return data.url;
+  return signed.public_url;
 }
 
-async function streamToBuffer(
-  stream: ReturnType<typeof createReadStream>
-): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
+// 粗糙的扩展名 → mime 映射。漏掉的回落到 application/octet-stream，R2 接受。
+function inferContentType(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() ?? '';
+  const map: Record<string, string> = {
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    webm: 'video/webm',
+    mkv: 'video/x-matroska',
+    avi: 'video/x-msvideo',
+    flv: 'video/x-flv',
+    m4v: 'video/x-m4v',
+    mp3: 'audio/mpeg',
+    wav: 'audio/wav',
+    aac: 'audio/aac',
+    m4a: 'audio/mp4',
+    flac: 'audio/flac',
+    opus: 'audio/opus',
+    ogg: 'audio/ogg',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    gif: 'image/gif',
+  };
+  return map[ext] ?? 'application/octet-stream';
 }
 
 /** 获取当前用户信息 */
