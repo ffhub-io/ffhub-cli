@@ -1,11 +1,12 @@
-import { createWriteStream, existsSync, unlinkSync } from 'fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
 import { extname, join, parse, resolve } from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createTask, formatSize, getMe, getTask, listTasks, uploadFile, waitForTask } from './api.js';
 import { getApiKey, loadConfig, saveConfig } from './config.js';
 
-const VERSION = '1.3.6';
+const VERSION = '1.3.7';
 
 const HELP = `
   ffhub - Cloud FFmpeg CLI (v${VERSION})
@@ -312,7 +313,80 @@ function printTaskList(tasks: any[], total: number) {
   console.log('');
 }
 
-main().catch((err) => {
-  console.error(`\n  Error: ${err.message}`);
-  process.exit(1);
-});
+// ─── Update check ────────────────────────────────────────────────────────
+//
+// Kick off a registry lookup early in main(), await it just before exit so
+// we don't add latency to the main path. Results are cached for 24h in
+// ~/.ffhub/update-check.json — typical user sees one network roundtrip
+// per day. All failures swallowed: this is a UX nicety, never a blocker.
+
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const UPDATE_CACHE_FILE = join(homedir(), '.ffhub', 'update-check.json');
+
+function startUpdateCheck(currentVersion: string): Promise<string | null> {
+  // Skip when stdout isn't a TTY (CI / piped output) — no humans, no prompt.
+  if (!process.stdout.isTTY) return Promise.resolve(null);
+
+  try {
+    if (existsSync(UPDATE_CACHE_FILE)) {
+      const cached = JSON.parse(readFileSync(UPDATE_CACHE_FILE, 'utf-8')) as {
+        latest?: string;
+        checkedAt?: number;
+      };
+      if (
+        cached.latest &&
+        cached.checkedAt &&
+        Date.now() - cached.checkedAt < UPDATE_CHECK_INTERVAL_MS
+      ) {
+        return Promise.resolve(isNewer(cached.latest, currentVersion) ? cached.latest : null);
+      }
+    }
+  } catch {
+    /* corrupt cache — fall through to a fresh lookup */
+  }
+
+  return fetch('https://registry.npmjs.org/ffhub/latest', {
+    headers: { Accept: 'application/json' },
+  })
+    .then((res) => (res.ok ? (res.json() as Promise<{ version?: string }>) : null))
+    .then((data) => {
+      const latest = data?.version;
+      if (!latest) return null;
+      try {
+        mkdirSync(join(homedir(), '.ffhub'), { recursive: true });
+        writeFileSync(UPDATE_CACHE_FILE, JSON.stringify({ latest, checkedAt: Date.now() }));
+      } catch {
+        /* best-effort */
+      }
+      return isNewer(latest, currentVersion) ? latest : null;
+    })
+    .catch(() => null); // offline / DNS / registry down — silent
+}
+
+/** Tiny semver compare for a.b.c style. Pre-release tags ignored. */
+function isNewer(a: string, b: string): boolean {
+  const pa = a.split('-')[0].split('.').map((x) => Number(x) || 0);
+  const pb = b.split('-')[0].split('.').map((x) => Number(x) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true;
+    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false;
+  }
+  return false;
+}
+
+// Fire-and-forget at module load; awaited at the end of main().
+const updateCheckPromise = startUpdateCheck(VERSION);
+
+main()
+  .then(async () => {
+    const latest = await updateCheckPromise;
+    if (latest) {
+      console.log('');
+      console.log(`  Update available: ${VERSION} → ${latest}`);
+      console.log('  Run: npm install -g ffhub@latest');
+    }
+  })
+  .catch((err) => {
+    console.error(`\n  Error: ${err.message}`);
+    process.exit(1);
+  });
