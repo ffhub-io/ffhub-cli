@@ -1,9 +1,11 @@
-import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { createWriteStream, existsSync, unlinkSync } from 'fs';
+import { extname, join, parse, resolve } from 'path';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { createTask, formatSize, getMe, getTask, listTasks, uploadFile, waitForTask } from './api.js';
 import { getApiKey, loadConfig, saveConfig } from './config.js';
 
-const VERSION = '1.3.4';
+const VERSION = '1.3.5';
 
 const HELP = `
   ffhub - Cloud FFmpeg CLI (v${VERSION})
@@ -94,7 +96,7 @@ async function main() {
     }
     const apiKey = requireApiKey();
     const task = await getTask(apiKey, args[1]);
-    printTaskResult(task);
+    await printTaskResult(task);
     return;
   }
 
@@ -129,7 +131,7 @@ async function main() {
   });
 
   console.log('');
-  printTaskResult(task);
+  await printTaskResult(task);
 }
 
 function requireApiKey(): string {
@@ -171,18 +173,10 @@ async function processArgs(apiKey: string, args: string[]): Promise<string[]> {
   return result;
 }
 
-function printTaskResult(task: any) {
+async function printTaskResult(task: any): Promise<void> {
   // Accept both 'succeeded' (v2 backend) and 'completed' (older builds).
   if (task.status === 'succeeded' || task.status === 'completed') {
     console.log('  Done!\n');
-    if (task.outputs && task.outputs.length > 0) {
-      for (const output of task.outputs) {
-        console.log(`  ${output.filename}`);
-        console.log(`    URL:  ${output.url}`);
-        console.log(`    Size: ${formatSize(output.size)}`);
-        console.log('');
-      }
-    }
     if (task.elapsed) {
       console.log(`  Execution time: ${task.elapsed}s`);
     }
@@ -190,17 +184,12 @@ function printTaskResult(task: any) {
       console.log(`  Total time: ${task.total_elapsed}s`);
     }
 
-    // Download hints
-    console.log('');
-    console.log('  Download:');
-    if (process.platform === 'win32') {
-      console.log('    curl -O <url>');
-      console.log('    Invoke-WebRequest -Uri <url> -OutFile <filename>');
-    } else {
-      console.log('    curl -O <url>');
-      console.log('    wget <url>');
+    if (task.outputs && task.outputs.length > 0) {
+      console.log('');
+      for (const output of task.outputs) {
+        await downloadOutput(output);
+      }
     }
-    console.log('    or open the URL in your browser');
   } else if (task.status === 'failed') {
     console.error(`\n  Failed: ${task.error || 'unknown error'}`);
     process.exit(1);
@@ -209,6 +198,90 @@ function printTaskResult(task: any) {
     console.log(`  Task ID: ${task.task_id}`);
     console.log(`  Run "ffhub status ${task.task_id}" to check again`);
   }
+}
+
+/**
+ * Stream a single output file to the current directory, picking a non-clashing
+ * name (xxx.mp3 → xxx-2.mp3 → xxx-3.mp3 ...) so we never overwrite a paid
+ * artifact the user already has. Ctrl+C aborts mid-stream — we clean the
+ * partial file and remind the user how to resume manually.
+ */
+async function downloadOutput(output: { url: string; filename: string; size: number }): Promise<void> {
+  const targetPath = resolveUniquePath(process.cwd(), output.filename);
+  const displayName =
+    targetPath.endsWith(output.filename) ? output.filename : `${output.filename} → ${parse(targetPath).base}`;
+
+  console.log(`  Downloading ${displayName} (${formatSize(output.size)}, Ctrl+C to cancel)`);
+
+  const ctrl = new AbortController();
+  const onSigint = () => ctrl.abort();
+  process.on('SIGINT', onSigint);
+
+  try {
+    const res = await fetch(output.url, { signal: ctrl.signal });
+    if (!res.ok || !res.body) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const total = Number(res.headers.get('content-length')) || output.size || 0;
+    let done = 0;
+
+    // Hook progress drawing into the byte stream before piping to disk.
+    const src = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream<Uint8Array>);
+    src.on('data', (chunk: Buffer) => {
+      done += chunk.length;
+      drawDownloadProgress(done, total);
+    });
+
+    await pipeline(src, createWriteStream(targetPath));
+
+    // Clear progress line, then print final state.
+    process.stdout.write('\r' + ' '.repeat(70) + '\r');
+    console.log(`  Saved: ${parse(targetPath).base}`);
+  } catch (err: any) {
+    // Always try to clean up a partial file so disk doesn't fill on repeated aborts.
+    if (existsSync(targetPath)) {
+      try {
+        unlinkSync(targetPath);
+      } catch {
+        /* best effort */
+      }
+    }
+    process.stdout.write('\r' + ' '.repeat(70) + '\r');
+    if (err?.name === 'AbortError') {
+      console.log(`  Cancelled. To resume manually:\n    curl -O '${output.url}'`);
+      process.exit(130); // SIGINT exit code
+    }
+    console.error(`  Download failed: ${err?.message || err}`);
+    console.error(`  You can retry manually: curl -O '${output.url}'`);
+  } finally {
+    process.off('SIGINT', onSigint);
+  }
+}
+
+/** Pick a path in `dir` that doesn't collide with an existing file.
+ * xxx.mp3 → xxx-2.mp3 → xxx-3.mp3 ... (mirrors OS Finder / Files behaviour). */
+function resolveUniquePath(dir: string, filename: string): string {
+  const first = join(dir, filename);
+  if (!existsSync(first)) return first;
+  const ext = extname(filename);
+  const stem = filename.slice(0, filename.length - ext.length);
+  for (let n = 2; n < 1000; n++) {
+    const candidate = join(dir, `${stem}-${n}${ext}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+  // 1000+ collisions in one dir — give up nicely with a timestamp suffix.
+  return join(dir, `${stem}-${Date.now()}${ext}`);
+}
+
+/** Single-line ASCII progress bar, rewritten in place. */
+function drawDownloadProgress(done: number, total: number): void {
+  const pct = total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 0;
+  const width = 24;
+  const filled = total > 0 ? Math.floor((pct / 100) * width) : 0;
+  const bar = '█'.repeat(filled) + '░'.repeat(width - filled);
+  const totalStr = total > 0 ? formatSize(total) : '?';
+  const line = `    ${bar} ${pct.toString().padStart(3)}%  ${formatSize(done)} / ${totalStr}`;
+  process.stdout.write(`\r${line.padEnd(70)}`);
 }
 
 function printTaskList(tasks: any[], total: number) {
