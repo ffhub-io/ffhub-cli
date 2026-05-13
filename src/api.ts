@@ -3,9 +3,9 @@ import { basename } from 'path';
 
 const API_BASE = 'https://api.ffhub.io';
 
-/** 统一 HTTP 错误处理 —— 401 单独识别（API key 失效），其他状态尝试读
- * body.message，失败回落到 HTTP 状态码。成功时不消费 body，调用方可继续
- * res.json()。 */
+/** 统一 HTTP 错误处理 —— 401 单独识别（API key 失效），其他状态从 huma
+ * 返回的 RFC 7807 body 取 detail（具体原因）/ title（通用名），都没有时
+ * 才回落到 HTTP 状态码。成功时不消费 body，调用方可继续 res.json()。 */
 async function ensureOk(res: Response, action: string): Promise<void> {
   if (res.ok) return;
   if (res.status === 401) {
@@ -13,13 +13,17 @@ async function ensureOk(res: Response, action: string): Promise<void> {
       'API key 无效或已撤销。在 https://www.ffhub.io/dashboard/api-keys 创建新 key，然后运行 `ffhub config <api_key>` 更新'
     );
   }
-  let body: { message?: string } = {};
+  let body: { detail?: string; title?: string; message?: string } = {};
   try {
-    body = (await res.json()) as { message?: string };
+    body = (await res.json()) as typeof body;
   } catch {
     /* body 不是 JSON 也吞掉 */
   }
-  throw new Error(body.message || `${action}: HTTP ${res.status}`);
+  // huma (RFC 7807): detail = 具体原因 ("invalid ffmpeg command: missing input")
+  // title  = 通用名 ("Bad Request")
+  // message 是早期版本字段，兼容保留。
+  const reason = body.detail || body.message || body.title;
+  throw new Error(reason ? `${action}: ${reason}` : `${action}: HTTP ${res.status}`);
 }
 
 export interface TaskResult {
