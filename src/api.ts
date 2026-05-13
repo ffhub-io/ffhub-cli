@@ -10,7 +10,7 @@ async function ensureOk(res: Response, action: string): Promise<void> {
   if (res.ok) return;
   if (res.status === 401) {
     throw new Error(
-      'API key 无效或已撤销。在 https://www.ffhub.io/dashboard/api-keys 创建新 key，然后运行 `ffhub config <api_key>` 更新'
+      'API key invalid or revoked. Create a new one at https://www.ffhub.io/dashboard/api-keys, then run `ffhub config <api_key>`.'
     );
   }
   let body: { detail?: string; title?: string; message?: string } = {};
@@ -52,7 +52,7 @@ export async function createTask(
     },
     body: JSON.stringify({ command, with_metadata: withMetadata }),
   });
-  await ensureOk(res, '创建任务失败');
+  await ensureOk(res, 'Failed to create task');
 
   const data = (await res.json()) as { task_id: string };
   return data.task_id;
@@ -63,7 +63,7 @@ export async function getTask(apiKey: string, taskId: string): Promise<TaskResul
   const res = await fetch(`${API_BASE}/v1/tasks/${taskId}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-  await ensureOk(res, '查询任务失败');
+  await ensureOk(res, 'Failed to get task');
   return (await res.json()) as TaskResult;
 }
 
@@ -84,7 +84,7 @@ export async function waitForTask(
 
     await sleep(5000);
   }
-  throw new Error('任务超时（30 分钟）');
+  throw new Error('Task timed out (30 min)');
 }
 
 /** 上传本地文件
@@ -117,7 +117,7 @@ export async function uploadFile(
       content_type: contentType,
     }),
   });
-  await ensureOk(signRes, '签名失败');
+  await ensureOk(signRes, 'Failed to sign upload');
   const signed = (await signRes.json()) as {
     upload_url: string;
     public_url: string;
@@ -138,7 +138,7 @@ export async function uploadFile(
   } as RequestInit & { duplex: 'half' });
 
   if (!putRes.ok) {
-    throw new Error(`上传失败: HTTP ${putRes.status}`);
+    throw new Error(`Upload failed: HTTP ${putRes.status}`);
   }
 
   console.log(
@@ -179,7 +179,7 @@ export async function getMe(apiKey: string): Promise<{ user_id: string; email: s
   const res = await fetch(`${API_BASE}/v1/me`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-  await ensureOk(res, '查询用户信息失败');
+  await ensureOk(res, 'Failed to get user info');
   return (await res.json()) as { user_id: string; email: string; remaining_credits: number };
 }
 
@@ -195,7 +195,7 @@ export async function listTasks(
   const res = await fetch(`${API_BASE}/v1/tasks?${params}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-  await ensureOk(res, '查询任务列表失败');
+  await ensureOk(res, 'Failed to list tasks');
   return (await res.json()) as { total: number; tasks: TaskResult[] };
 }
 

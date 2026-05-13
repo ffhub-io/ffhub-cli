@@ -3,7 +3,7 @@ import { resolve } from 'path';
 import { createTask, formatSize, getMe, getTask, listTasks, uploadFile, waitForTask } from './api.js';
 import { getApiKey, loadConfig, saveConfig } from './config.js';
 
-const VERSION = '1.3.2';
+const VERSION = '1.3.3';
 
 const HELP = `
   ffhub - Cloud FFmpeg CLI (v${VERSION})
