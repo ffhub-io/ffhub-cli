@@ -1,5 +1,7 @@
 # ffhub
 
+**English** · [中文](README.zh.md) · [日本語](README.ja.md) · [Português](README.pt.md) · [Deutsch](README.de.md)
+
 Cloud FFmpeg CLI — process video/audio files via [FFHub.io](https://ffhub.io) API. No local FFmpeg installation required.
 
 ## Install
