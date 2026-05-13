@@ -25,7 +25,8 @@ export function saveConfig(config: Config) {
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + '\n');
 }
 
-/** 获取 API Key：环境变量优先，其次配置文件 */
+/** Read API key — env var FFHUB_API_KEY takes precedence, then the saved
+ * config file. */
 export function getApiKey(): string | undefined {
   return process.env.FFHUB_API_KEY || loadConfig().api_key;
 }

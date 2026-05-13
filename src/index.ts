@@ -3,7 +3,7 @@ import { resolve } from 'path';
 import { createTask, formatSize, getMe, getTask, listTasks, uploadFile, waitForTask } from './api.js';
 import { getApiKey, loadConfig, saveConfig } from './config.js';
 
-const VERSION = '1.3.3';
+const VERSION = '1.3.4';
 
 const HELP = `
   ffhub - Cloud FFmpeg CLI (v${VERSION})
@@ -98,26 +98,33 @@ async function main() {
     return;
   }
 
-  // ffhub [ffmpeg args] — 提交任务
+  // ffhub [ffmpeg args] — submit a task
   const apiKey = requireApiKey();
 
-  // 构建 FFmpeg 命令，处理本地文件上传
+  // Build the FFmpeg command, uploading any local file inputs as we go.
   const processedArgs = await processArgs(apiKey, args);
   const command = 'ffmpeg ' + processedArgs.join(' ');
 
   console.log(`\n  Command: ${command}\n`);
 
-  // 创建任务
+  // Create the task
   const taskId = await createTask(apiKey, command);
   console.log(`  Task created: ${taskId}`);
   console.log('  Processing...\n');
 
-  // 等待完成
-  let lastProgress = -1;
+  // Poll until terminal state. FFmpeg work reports 0–100; after 100 the worker
+  // is uploading the result to R2 — say so, otherwise the user sees a stuck
+  // "100% [running]".
+  let lastLine = '';
   const task = await waitForTask(apiKey, taskId, (progress, status) => {
-    if (progress !== lastProgress) {
-      lastProgress = progress;
-      process.stdout.write(`\r  Progress: ${progress}% [${status}]`);
+    const line =
+      progress >= 100 && status === 'running'
+        ? '  Finalizing output (uploading to storage)...'
+        : `  Progress: ${progress}% [${status}]`;
+    if (line !== lastLine) {
+      lastLine = line;
+      // pad to overwrite leftover chars from the previous shorter line
+      process.stdout.write(`\r${line.padEnd(60)}`);
     }
   });
 
@@ -137,14 +144,16 @@ function requireApiKey(): string {
   return apiKey;
 }
 
-/** 处理参数：检测本地文件并上传 */
+/** Walk the ffmpeg args, uploading any local file referenced by -i and
+ * replacing it with the resulting public URL. URLs and missing paths pass
+ * through untouched. */
 async function processArgs(apiKey: string, args: string[]): Promise<string[]> {
   const result: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
-    // 检查 -i 后面的参数是否是本地文件
+    // The arg after -i is the input; check whether it's a local file path.
     if (arg === '-i' && i + 1 < args.length) {
       const input = args[i + 1];
       if (!input.startsWith('http://') && !input.startsWith('https://') && existsSync(resolve(input))) {
@@ -163,7 +172,8 @@ async function processArgs(apiKey: string, args: string[]): Promise<string[]> {
 }
 
 function printTaskResult(task: any) {
-  if (task.status === 'completed') {
+  // Accept both 'succeeded' (v2 backend) and 'completed' (older builds).
+  if (task.status === 'succeeded' || task.status === 'completed') {
     console.log('  Done!\n');
     if (task.outputs && task.outputs.length > 0) {
       for (const output of task.outputs) {
@@ -180,7 +190,7 @@ function printTaskResult(task: any) {
       console.log(`  Total time: ${task.total_elapsed}s`);
     }
 
-    // 下载提示
+    // Download hints
     console.log('');
     console.log('  Download:');
     if (process.platform === 'win32') {

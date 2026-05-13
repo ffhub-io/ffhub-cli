@@ -3,9 +3,11 @@ import { basename } from 'path';
 
 const API_BASE = 'https://api.ffhub.io';
 
-/** 统一 HTTP 错误处理 —— 401 单独识别（API key 失效），其他状态从 huma
- * 返回的 RFC 7807 body 取 detail（具体原因）/ title（通用名），都没有时
- * 才回落到 HTTP 状态码。成功时不消费 body，调用方可继续 res.json()。 */
+/** Unified HTTP error handler. 401 is reported with a hint about the API key;
+ * other statuses read RFC 7807 fields from the body (detail → specific cause,
+ * title → generic name), falling back to the HTTP status code if neither is
+ * present. Body is only consumed on error, so callers can still res.json()
+ * on success. */
 async function ensureOk(res: Response, action: string): Promise<void> {
   if (res.ok) return;
   if (res.status === 401) {
@@ -17,11 +19,11 @@ async function ensureOk(res: Response, action: string): Promise<void> {
   try {
     body = (await res.json()) as typeof body;
   } catch {
-    /* body 不是 JSON 也吞掉 */
+    /* body wasn't JSON — swallow */
   }
-  // huma (RFC 7807): detail = 具体原因 ("invalid ffmpeg command: missing input")
-  // title  = 通用名 ("Bad Request")
-  // message 是早期版本字段，兼容保留。
+  // huma (RFC 7807): detail = specific reason ("invalid ffmpeg command: missing input")
+  //                  title  = generic name ("Bad Request")
+  // `message` is kept for backward compatibility with older server versions.
   const reason = body.detail || body.message || body.title;
   throw new Error(reason ? `${action}: ${reason}` : `${action}: HTTP ${res.status}`);
 }
@@ -38,7 +40,7 @@ export interface TaskResult {
   elapsed?: string;
 }
 
-/** 创建任务 */
+/** Create a task. */
 export async function createTask(
   apiKey: string,
   command: string,
@@ -58,7 +60,8 @@ export async function createTask(
   return data.task_id;
 }
 
-/** 查询任务状态。GET /v1/tasks/{id} 需要 Bearer token（且只能查自己的任务）。 */
+/** Fetch task status. GET /v1/tasks/{id} requires a Bearer token and only
+ * returns tasks owned by the caller. */
 export async function getTask(apiKey: string, taskId: string): Promise<TaskResult> {
   const res = await fetch(`${API_BASE}/v1/tasks/${taskId}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -67,18 +70,21 @@ export async function getTask(apiKey: string, taskId: string): Promise<TaskResul
   return (await res.json()) as TaskResult;
 }
 
-/** 轮询等待任务完成 */
+/** Poll until the task reaches a terminal state. */
 export async function waitForTask(
   apiKey: string,
   taskId: string,
   onProgress?: (progress: number, status: string) => void
 ): Promise<TaskResult> {
-  const maxAttempts = 360; // 最多等 30 分钟
+  const maxAttempts = 360; // 30 min max wait
   for (let i = 0; i < maxAttempts; i++) {
     const task = await getTask(apiKey, taskId);
     onProgress?.(task.progress, task.status);
 
-    if (task.status === 'completed' || task.status === 'failed') {
+    // Backend uses 'succeeded' since v2 (older builds returned 'completed');
+    // accept both so we don't hang forever waiting for a status that will
+    // never come.
+    if (task.status === 'succeeded' || task.status === 'completed' || task.status === 'failed') {
       return task;
     }
 
@@ -87,14 +93,15 @@ export async function waitForTask(
   throw new Error('Task timed out (30 min)');
 }
 
-/** 上传本地文件
+/** Upload a local file.
  *
- * 两步流程：
- *   1. POST /v1/uploads/sign 拿一次性 presigned PUT URL
- *   2. fetch PUT 直传 R2，body 是 Node Readable stream，文件不全部进内存
+ * Two-step flow:
+ *   1. POST /v1/uploads/sign to get a one-time presigned PUT URL.
+ *   2. PUT directly to R2 using a Node Readable stream so the file body
+ *      never lives in memory all at once.
  *
- * 替代了老的 files-api.ffhub.io multipart 路径，那条路径在 Cloudflare
- * Workers 上有 500MB body / 128MB 内存上限。新路径上限是 R2 单 PUT 5GB。
+ * Replaces the old files-api.ffhub.io multipart path, which had 500 MB body
+ * / 128 MB memory caps on Cloudflare Workers. R2 single-PUT cap is 5 GB.
  */
 export async function uploadFile(
   apiKey: string,
@@ -104,7 +111,7 @@ export async function uploadFile(
   const stat = statSync(filePath);
   const contentType = inferContentType(filename);
 
-  // 1. 签名
+  // 1. Sign
   const signRes = await fetch(`${API_BASE}/v1/uploads/sign`, {
     method: 'POST',
     headers: {
@@ -124,16 +131,18 @@ export async function uploadFile(
     content_type: string;
   };
 
-  // 2. PUT 直传 R2。Node 18+ fetch 接受 ReadableStream body，不会 buffer 全文件。
+  // 2. PUT direct to R2. Node 18+ fetch accepts a ReadableStream body, so
+  //    the file isn't buffered into memory.
   const putRes = await fetch(signed.upload_url, {
     method: 'PUT',
-    // Content-Type 必须跟签名时一致，R2 才认。
+    // Content-Type must match what we signed with — R2 rejects mismatches.
     headers: {
       'Content-Type': signed.content_type,
       'Content-Length': String(stat.size),
     },
     body: createReadStream(filePath) as unknown as BodyInit,
-    // streaming body 需要显式声明 duplex（HTTP 标准要求，Node fetch 跟随）
+    // streaming body requires an explicit duplex setting (HTTP spec; Node
+    // fetch follows).
     duplex: 'half',
   } as RequestInit & { duplex: 'half' });
 
@@ -142,12 +151,13 @@ export async function uploadFile(
   }
 
   console.log(
-    `  已上传: ${filename} (${formatSize(stat.size)}) → ${signed.public_url}`
+    `  Uploaded: ${filename} (${formatSize(stat.size)}) → ${signed.public_url}`
   );
   return signed.public_url;
 }
 
-// 粗糙的扩展名 → mime 映射。漏掉的回落到 application/octet-stream，R2 接受。
+// Rough ext → mime map. Anything missing falls back to application/octet-stream,
+// which R2 accepts.
 function inferContentType(filename: string): string {
   const ext = filename.toLowerCase().split('.').pop() ?? '';
   const map: Record<string, string> = {
@@ -174,7 +184,7 @@ function inferContentType(filename: string): string {
   return map[ext] ?? 'application/octet-stream';
 }
 
-/** 获取当前用户信息 */
+/** Fetch the current user's info. */
 export async function getMe(apiKey: string): Promise<{ user_id: string; email: string; remaining_credits: number }> {
   const res = await fetch(`${API_BASE}/v1/me`, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -183,7 +193,7 @@ export async function getMe(apiKey: string): Promise<{ user_id: string; email: s
   return (await res.json()) as { user_id: string; email: string; remaining_credits: number };
 }
 
-/** 查询任务列表 */
+/** List the current user's tasks. */
 export async function listTasks(
   apiKey: string,
   limit = 10,
