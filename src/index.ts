@@ -5,7 +5,7 @@ import { pipeline } from 'stream/promises';
 import { createTask, formatSize, getMe, getTask, listTasks, uploadFile, waitForTask } from './api.js';
 import { getApiKey, loadConfig, saveConfig } from './config.js';
 
-const VERSION = '1.3.5';
+const VERSION = '1.3.6';
 
 const HELP = `
   ffhub - Cloud FFmpeg CLI (v${VERSION})
@@ -159,8 +159,12 @@ async function processArgs(apiKey: string, args: string[]): Promise<string[]> {
     if (arg === '-i' && i + 1 < args.length) {
       const input = args[i + 1];
       if (!input.startsWith('http://') && !input.startsWith('https://') && existsSync(resolve(input))) {
-        console.log(`  Local file detected: ${input}, uploading...`);
-        const url = await uploadFile(apiKey, resolve(input));
+        console.log(`  Uploading ${input} (Ctrl+C to cancel)`);
+        const { url, size } = await uploadFile(apiKey, resolve(input), (done, total) => {
+          drawTransferProgress(done, total);
+        });
+        process.stdout.write('\r' + ' '.repeat(70) + '\r');
+        console.log(`  Uploaded: ${input} (${formatSize(size)})`);
         result.push('-i', url);
         i++;
         continue;
@@ -229,7 +233,7 @@ async function downloadOutput(output: { url: string; filename: string; size: num
     const src = Readable.fromWeb(res.body as unknown as import('stream/web').ReadableStream<Uint8Array>);
     src.on('data', (chunk: Buffer) => {
       done += chunk.length;
-      drawDownloadProgress(done, total);
+      drawTransferProgress(done, total);
     });
 
     await pipeline(src, createWriteStream(targetPath));
@@ -273,8 +277,9 @@ function resolveUniquePath(dir: string, filename: string): string {
   return join(dir, `${stem}-${Date.now()}${ext}`);
 }
 
-/** Single-line ASCII progress bar, rewritten in place. */
-function drawDownloadProgress(done: number, total: number): void {
+/** Single-line ASCII progress bar, rewritten in place. Shared by upload
+ * and download since the shape (bar + bytes-done / bytes-total) is identical. */
+function drawTransferProgress(done: number, total: number): void {
   const pct = total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 0;
   const width = 24;
   const filled = total > 0 ? Math.floor((pct / 100) * width) : 0;

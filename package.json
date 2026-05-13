@@ -1,6 +1,6 @@
 {
   "name": "ffhub",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "description": "Cloud FFmpeg CLI — process video/audio files via FFHub.io API",
   "type": "module",
   "bin": {

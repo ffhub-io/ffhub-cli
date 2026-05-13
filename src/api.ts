@@ -76,7 +76,10 @@ export async function waitForTask(
   taskId: string,
   onProgress?: (progress: number, status: string) => void
 ): Promise<TaskResult> {
-  const maxAttempts = 360; // 30 min max wait
+  // 2s interval keeps short tasks visible (1s ffmpeg jobs used to jump
+  // 0 → 100 with the old 5s loop) without hammering the API.
+  const intervalMs = 2000;
+  const maxAttempts = (30 * 60 * 1000) / intervalMs; // 30 min cap
   for (let i = 0; i < maxAttempts; i++) {
     const task = await getTask(apiKey, taskId);
     onProgress?.(task.progress, task.status);
@@ -88,7 +91,7 @@ export async function waitForTask(
       return task;
     }
 
-    await sleep(5000);
+    await sleep(intervalMs);
   }
   throw new Error('Task timed out (30 min)');
 }
@@ -105,8 +108,9 @@ export async function waitForTask(
  */
 export async function uploadFile(
   apiKey: string,
-  filePath: string
-): Promise<string> {
+  filePath: string,
+  onProgress?: (uploaded: number, total: number) => void
+): Promise<{ url: string; size: number }> {
   const filename = basename(filePath);
   const stat = statSync(filePath);
   const contentType = inferContentType(filename);
@@ -133,6 +137,18 @@ export async function uploadFile(
 
   // 2. PUT direct to R2. Node 18+ fetch accepts a ReadableStream body, so
   //    the file isn't buffered into memory.
+  // Tap the file stream's 'data' event for progress — close enough to
+  // network bytes-out for UX purposes (Node feeds buffers into fetch as
+  // they're read, so 'data' lags real upload by at most the network buffer).
+  const fileStream = createReadStream(filePath);
+  if (onProgress) {
+    let uploaded = 0;
+    fileStream.on('data', (chunk: Buffer | string) => {
+      uploaded += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+      onProgress(uploaded, stat.size);
+    });
+  }
+
   const putRes = await fetch(signed.upload_url, {
     method: 'PUT',
     // Content-Type must match what we signed with — R2 rejects mismatches.
@@ -140,7 +156,7 @@ export async function uploadFile(
       'Content-Type': signed.content_type,
       'Content-Length': String(stat.size),
     },
-    body: createReadStream(filePath) as unknown as BodyInit,
+    body: fileStream as unknown as BodyInit,
     // streaming body requires an explicit duplex setting (HTTP spec; Node
     // fetch follows).
     duplex: 'half',
@@ -150,10 +166,7 @@ export async function uploadFile(
     throw new Error(`Upload failed: HTTP ${putRes.status}`);
   }
 
-  console.log(
-    `  Uploaded: ${filename} (${formatSize(stat.size)}) → ${signed.public_url}`
-  );
-  return signed.public_url;
+  return { url: signed.public_url, size: stat.size };
 }
 
 // Rough ext → mime map. Anything missing falls back to application/octet-stream,
