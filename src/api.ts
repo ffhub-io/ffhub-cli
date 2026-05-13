@@ -3,6 +3,25 @@ import { basename } from 'path';
 
 const API_BASE = 'https://api.ffhub.io';
 
+/** 统一 HTTP 错误处理 —— 401 单独识别（API key 失效），其他状态尝试读
+ * body.message，失败回落到 HTTP 状态码。成功时不消费 body，调用方可继续
+ * res.json()。 */
+async function ensureOk(res: Response, action: string): Promise<void> {
+  if (res.ok) return;
+  if (res.status === 401) {
+    throw new Error(
+      'API key 无效或已撤销。在 https://www.ffhub.io/dashboard/api-keys 创建新 key，然后运行 `ffhub config <api_key>` 更新'
+    );
+  }
+  let body: { message?: string } = {};
+  try {
+    body = (await res.json()) as { message?: string };
+  } catch {
+    /* body 不是 JSON 也吞掉 */
+  }
+  throw new Error(body.message || `${action}: HTTP ${res.status}`);
+}
+
 export interface TaskResult {
   task_id: string;
   status: string;
@@ -29,30 +48,18 @@ export async function createTask(
     },
     body: JSON.stringify({ command, with_metadata: withMetadata }),
   });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(
-      (body as any).message || `创建任务失败: HTTP ${res.status}`
-    );
-  }
+  await ensureOk(res, '创建任务失败');
 
   const data = (await res.json()) as { task_id: string };
   return data.task_id;
 }
 
-/** 查询任务状态
- *
- * 后端 GET /v1/tasks/:id 目前为了兼容老 CLI 没强制 token，未来版本会切到必须鉴权。
- * CLI 这边主动带 token，提前对齐，未来切换时无感升级。
- */
+/** 查询任务状态。GET /v1/tasks/{id} 需要 Bearer token（且只能查自己的任务）。 */
 export async function getTask(apiKey: string, taskId: string): Promise<TaskResult> {
   const res = await fetch(`${API_BASE}/v1/tasks/${taskId}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-  if (!res.ok) {
-    throw new Error(`查询任务失败: HTTP ${res.status}`);
-  }
+  await ensureOk(res, '查询任务失败');
   return (await res.json()) as TaskResult;
 }
 
@@ -106,10 +113,7 @@ export async function uploadFile(
       content_type: contentType,
     }),
   });
-  if (!signRes.ok) {
-    const body = (await signRes.json().catch(() => ({}))) as { message?: string };
-    throw new Error(body.message || `签名失败: HTTP ${signRes.status}`);
-  }
+  await ensureOk(signRes, '签名失败');
   const signed = (await signRes.json()) as {
     upload_url: string;
     public_url: string;
@@ -171,12 +175,7 @@ export async function getMe(apiKey: string): Promise<{ user_id: string; email: s
   const res = await fetch(`${API_BASE}/v1/me`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as any).message || `Failed: HTTP ${res.status}`);
-  }
-
+  await ensureOk(res, '查询用户信息失败');
   return (await res.json()) as { user_id: string; email: string; remaining_credits: number };
 }
 
@@ -192,11 +191,7 @@ export async function listTasks(
   const res = await fetch(`${API_BASE}/v1/tasks?${params}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
-
-  if (!res.ok) {
-    throw new Error(`Failed to list tasks: HTTP ${res.status}`);
-  }
-
+  await ensureOk(res, '查询任务列表失败');
   return (await res.json()) as { total: number; tasks: TaskResult[] };
 }
 
