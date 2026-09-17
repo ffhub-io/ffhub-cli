@@ -5,8 +5,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createTask, formatSize, getMe, getTask, listTasks, uploadFile, waitForTask } from './api.js';
 import { getApiKey, loadConfig, saveConfig } from './config.js';
-
-const VERSION = '1.3.7';
+import { VERSION } from './version.js';
 
 const HELP = `
   ffhub - Cloud FFmpeg CLI (v${VERSION})

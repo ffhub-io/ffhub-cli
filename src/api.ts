@@ -1,7 +1,20 @@
 import { createReadStream, statSync } from 'fs';
 import { basename } from 'path';
+import { VERSION } from './version.js';
 
 const API_BASE = 'https://api.ffhub.io';
+
+/** Sent on every FFHub API request so the backend can tell CLI traffic apart
+ * from n8n, the web playground, or direct API calls. */
+const USER_AGENT = `ffhub-cli/${VERSION}`;
+
+function apiHeaders(apiKey: string, json = false): Record<string, string> {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    'User-Agent': USER_AGENT,
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+  };
+}
 
 /** Unified HTTP error handler. 401 is reported with a hint about the API key;
  * other statuses read RFC 7807 fields from the body (detail → specific cause,
@@ -48,10 +61,7 @@ export async function createTask(
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/v1/tasks`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: apiHeaders(apiKey, true),
     body: JSON.stringify({ command, with_metadata: withMetadata }),
   });
   await ensureOk(res, 'Failed to create task');
@@ -64,7 +74,7 @@ export async function createTask(
  * returns tasks owned by the caller. */
 export async function getTask(apiKey: string, taskId: string): Promise<TaskResult> {
   const res = await fetch(`${API_BASE}/v1/tasks/${taskId}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: apiHeaders(apiKey),
   });
   await ensureOk(res, 'Failed to get task');
   return (await res.json()) as TaskResult;
@@ -118,10 +128,7 @@ export async function uploadFile(
   // 1. Sign
   const signRes = await fetch(`${API_BASE}/v1/uploads/sign`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: apiHeaders(apiKey, true),
     body: JSON.stringify({
       filename,
       size: stat.size,
@@ -200,7 +207,7 @@ function inferContentType(filename: string): string {
 /** Fetch the current user's info. */
 export async function getMe(apiKey: string): Promise<{ user_id: string; email: string; remaining_credits: number }> {
   const res = await fetch(`${API_BASE}/v1/me`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: apiHeaders(apiKey),
   });
   await ensureOk(res, 'Failed to get user info');
   return (await res.json()) as { user_id: string; email: string; remaining_credits: number };
@@ -216,7 +223,7 @@ export async function listTasks(
   if (status) params.set('status', status);
 
   const res = await fetch(`${API_BASE}/v1/tasks?${params}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: apiHeaders(apiKey),
   });
   await ensureOk(res, 'Failed to list tasks');
   return (await res.json()) as { total: number; tasks: TaskResult[] };
