@@ -57,14 +57,17 @@ jobs:
       # 不需要 NODE_AUTH_TOKEN。2027-01 起 npm 不再允许用 token 直接发布新版本，
       # 之前的 NPM_TOKEN 在 2026-09 发 1.3.8 时已经 404。
       - name: Publish to npm
+        id: publish
         if: steps.check.outputs.publish == 'true'
         run: npm publish
 
       - name: Summary
         if: always()
         run: |
-          if [ "${{ steps.check.outputs.publish }}" = "true" ]; then
+          if [ "${{ steps.publish.outcome }}" = "success" ]; then
             echo "✅ Published ffhub@${{ steps.check.outputs.version }} to npm" >> $GITHUB_STEP_SUMMARY
-          else
+          elif [ "${{ steps.check.outputs.publish }}" = "false" ]; then
             echo "ℹ️ No version change, skipped publish" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Release failed; see job logs." >> $GITHUB_STEP_SUMMARY
           fi
