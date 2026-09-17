@@ -1,5 +1,6 @@
 import { createReadStream, statSync } from 'fs';
 import { basename } from 'path';
+import { Readable } from 'stream';
 import { VERSION } from './version.js';
 
 const API_BASE = 'https://api.ffhub.io';
@@ -142,19 +143,22 @@ export async function uploadFile(
     content_type: string;
   };
 
-  // 2. PUT direct to R2. Node 18+ fetch accepts a ReadableStream body, so
-  //    the file isn't buffered into memory.
-  // Tap the file stream's 'data' event for progress — close enough to
-  // network bytes-out for UX purposes (Node feeds buffers into fetch as
-  // they're read, so 'data' lags real upload by at most the network buffer).
+  // 2. PUT direct to R2, streaming so the file isn't buffered into memory.
+  // Progress is counted as fetch pulls each chunk. Don't attach a 'data'
+  // listener to the file stream instead: that starts it flowing on its own,
+  // chunks emitted before fetch begins reading are lost, and Node 20+ then
+  // refuses to send a body shorter than Content-Length ("fetch failed").
   const fileStream = createReadStream(filePath);
-  if (onProgress) {
-    let uploaded = 0;
-    fileStream.on('data', (chunk: Buffer | string) => {
-      uploaded += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
-      onProgress(uploaded, stat.size);
-    });
-  }
+  let uploaded = 0;
+  const body = Readable.from(
+    (async function* () {
+      for await (const chunk of fileStream) {
+        uploaded += chunk.length;
+        onProgress?.(uploaded, stat.size);
+        yield chunk;
+      }
+    })()
+  );
 
   const putRes = await fetch(signed.upload_url, {
     method: 'PUT',
@@ -163,7 +167,7 @@ export async function uploadFile(
       'Content-Type': signed.content_type,
       'Content-Length': String(stat.size),
     },
-    body: fileStream as unknown as BodyInit,
+    body: body as unknown as BodyInit,
     // streaming body requires an explicit duplex setting (HTTP spec; Node
     // fetch follows).
     duplex: 'half',
