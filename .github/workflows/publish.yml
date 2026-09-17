@@ -18,14 +18,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance（如果未来开 --provenance 用）
+      id-token: write # npm 可信发布（OIDC）必需：GitHub 向 npm 证明身份，不再用 NPM_TOKEN
     steps:
       - uses: actions/checkout@v4
 
+      # 可信发布要求 Node >= 22.14、npm >= 11.5.1。这里只影响构建和发布，
+      # CLI 本身仍按 tsup.config.ts 的 node18 目标打包。
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org/
+
+      - name: Upgrade npm
+        run: npm install -g npm@latest && npm --version
 
       - name: Install
         run: npm ci
@@ -48,11 +53,12 @@ jobs:
             echo "Same version already on npm, skipping publish."
           fi
 
+      # 走 npm 可信发布：npmjs.com 上 ffhub 包已登记本仓库的 publish.yml，
+      # 不需要 NODE_AUTH_TOKEN。2027-01 起 npm 不再允许用 token 直接发布新版本，
+      # 之前的 NPM_TOKEN 在 2026-09 发 1.3.8 时已经 404。
       - name: Publish to npm
         if: steps.check.outputs.publish == 'true'
         run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Summary
         if: always()
