@@ -296,6 +296,8 @@ function printTaskList(tasks: any[], total: number) {
   }
 
   const statusIcon: Record<string, string> = {
+    // Backend returns 'succeeded' since v2; 'completed' kept for older builds.
+    succeeded: '✓',
     completed: '✓',
     failed: '✗',
     running: '►',
