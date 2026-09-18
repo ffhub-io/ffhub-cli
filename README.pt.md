@@ -26,7 +26,7 @@ ffhub config YOUR_API_KEY
 export FFHUB_API_KEY=YOUR_API_KEY
 ```
 
-Pegue sua API key em [ffhub.io](https://ffhub.io) (tem plano gratuito).
+Pegue sua API key em [ffhub.io](https://ffhub.io). O cadastro dá 100 créditos uma única vez; depois você recarrega com pacotes de créditos avulsos (sem assinatura).
 
 ## Uso
 
@@ -61,9 +61,26 @@ ffhub -i ./my-video.mp4 -c:v libx264 output.mp4
 ffhub -i ~/Downloads/recording.mov -vn output.mp3
 ```
 
-### Status da tarefa
+### Arquivos de saída
+
+Quando a tarefa termina, o resultado é baixado em streaming, com barra de progresso, para **o
+diretório de onde você rodou o comando**. Nada é sobrescrito: se `output.mp4` já existir, o
+novo arquivo vira `output-2.mp4`, depois `output-3.mp4`, e assim por diante. Ctrl+C cancela o
+download — o arquivo parcial é apagado e a CLI mostra um comando `curl` para baixar depois.
+
+### Conta e tarefas
 
 ```bash
+# Conta atual e saldo de créditos
+ffhub whoami
+
+# As 10 tarefas mais recentes
+ffhub list
+
+# Filtrar por status (pending, running, succeeded, failed) e mudar a quantidade
+ffhub list --status=failed --limit=20
+
+# Uma tarefa específica — se já terminou, o resultado é baixado de novo
 ffhub status <task_id>
 ```
 
@@ -75,18 +92,21 @@ ffhub -i video.mp4 -c:v libx264 output.mp4
   ├─ Detecta arquivo local → envia para a nuvem FFHub
   ├─ Submete comando FFmpeg para a API
   ├─ Acompanha o progresso até concluir
-  └─ Retorna URL de download + info do arquivo
+  └─ Baixa o arquivo de saída para o diretório atual
 ```
 
 ## Comandos
 
 | Command | Descrição |
 |---------|-------------|
-| `ffhub [ffmpeg args]` | Submeter tarefa FFmpeg |
-| `ffhub status <id>` | Status da tarefa |
+| `ffhub [ffmpeg args]` | Submeter tarefa FFmpeg e baixar o resultado |
+| `ffhub whoami` | Mostrar a conta atual e o saldo de créditos |
+| `ffhub list [--status=X] [--limit=N]` | Listar tarefas recentes (padrão: 10); `ffhub ls` é atalho |
+| `ffhub status <id>` | Ver a tarefa e baixar o resultado se já estiver pronto |
 | `ffhub config <key>` | Salvar API key em `~/.ffhub/config.json` |
-| `ffhub config` | Mostrar API key atual |
-| `ffhub help` | Mostrar ajuda |
+| `ffhub config` | Mostrar API key atual (mascarada) |
+| `ffhub help` | Mostrar ajuda (`-h` / `--help` também funcionam) |
+| `ffhub --version` | Mostrar a versão da CLI (`-v` também funciona) |
 
 ## Requisitos
 

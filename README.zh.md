@@ -26,7 +26,7 @@ ffhub config YOUR_API_KEY
 export FFHUB_API_KEY=YOUR_API_KEY
 ```
 
-在 [ffhub.io](https://ffhub.io) 注册即可拿到 API key（有免费额度）。
+在 [ffhub.io](https://ffhub.io) 注册即可拿到 API key。注册一次性赠送 100 积分，用完后按需购买一次性积分包（没有订阅）。
 
 ## 用法
 
@@ -61,9 +61,25 @@ ffhub -i ./my-video.mp4 -c:v libx264 output.mp4
 ffhub -i ~/Downloads/recording.mov -vn output.mp3
 ```
 
-### 查询任务状态
+### 产物文件
+
+任务完成后，产物会带进度条流式下载到**你执行命令时所在的目录**。不会覆盖已有文件：
+`output.mp4` 已存在时自动存成 `output-2.mp4`、`output-3.mp4`，依次类推。下载途中按
+Ctrl+C 可取消，半截文件会被删掉，CLI 会打印一条 `curl` 命令供之后手动下载。
+
+### 账号与任务
 
 ```bash
+# 当前账号和积分余额
+ffhub whoami
+
+# 最近 10 条任务
+ffhub list
+
+# 按状态筛选（pending / running / succeeded / failed），并指定条数
+ffhub list --status=failed --limit=20
+
+# 查询单个任务；任务已完成时会再次下载产物
 ffhub status <task_id>
 ```
 
@@ -75,18 +91,21 @@ ffhub -i video.mp4 -c:v libx264 output.mp4
   ├─ 检测到本地文件 → 上传到 FFHub 云端
   ├─ 提交 FFmpeg 命令到 API
   ├─ 轮询进度直到完成
-  └─ 返回下载 URL + 文件信息
+  └─ 把产物下载到当前目录
 ```
 
 ## 命令一览
 
 | 命令 | 说明 |
 |---------|-------------|
-| `ffhub [ffmpeg args]` | 提交 FFmpeg 任务 |
-| `ffhub status <id>` | 查询任务状态 |
+| `ffhub [ffmpeg args]` | 提交 FFmpeg 任务并下载产物 |
+| `ffhub whoami` | 显示当前账号和积分余额 |
+| `ffhub list [--status=X] [--limit=N]` | 列出最近任务（默认 10 条）；`ffhub ls` 是别名 |
+| `ffhub status <id>` | 查询任务状态，已完成则下载产物 |
 | `ffhub config <key>` | 把 API key 存到 `~/.ffhub/config.json` |
-| `ffhub config` | 显示当前 API key |
-| `ffhub help` | 查看帮助 |
+| `ffhub config` | 显示当前 API key（打码） |
+| `ffhub help` | 查看帮助（`-h` / `--help` 同样可用） |
+| `ffhub --version` | 显示 CLI 版本（`-v` 同样可用） |
 
 ## 环境要求
 

@@ -26,7 +26,7 @@ ffhub config YOUR_API_KEY
 export FFHUB_API_KEY=YOUR_API_KEY
 ```
 
-API key は [ffhub.io](https://ffhub.io) で取得（無料枠あり）。
+API key は [ffhub.io](https://ffhub.io) で取得できます。登録時に 100 クレジットが一度だけ付与され、以降は都度購入のクレジットパックで補充します（サブスクリプションはありません）。
 
 ## 使い方
 
@@ -61,9 +61,26 @@ ffhub -i ./my-video.mp4 -c:v libx264 output.mp4
 ffhub -i ~/Downloads/recording.mov -vn output.mp3
 ```
 
-### タスクの状態確認
+### 出力ファイル
+
+タスクが完了すると、成果物は**コマンドを実行したディレクトリ**へ進捗バー付きでストリーミング
+ダウンロードされます。既存ファイルを上書きすることはありません。`output.mp4` がすでにある
+場合は `output-2.mp4`、`output-3.mp4` … という名前で保存されます。ダウンロード中に Ctrl+C
+で中断でき、書きかけのファイルは削除され、あとで取得するための `curl` コマンドが表示されます。
+
+### アカウントとタスク
 
 ```bash
+# 現在のアカウントとクレジット残高
+ffhub whoami
+
+# 直近 10 件のタスク
+ffhub list
+
+# ステータス（pending / running / succeeded / failed）と件数を指定
+ffhub list --status=failed --limit=20
+
+# 単一タスクの確認。完了済みなら成果物を改めてダウンロードします
 ffhub status <task_id>
 ```
 
@@ -75,18 +92,21 @@ ffhub -i video.mp4 -c:v libx264 output.mp4
   ├─ ローカルファイルを検出 → FFHub クラウドへアップロード
   ├─ FFmpeg コマンドを API に送信
   ├─ 完了まで進捗をポーリング
-  └─ ダウンロード URL + ファイル情報を返却
+  └─ 出力ファイルをカレントディレクトリにダウンロード
 ```
 
 ## コマンド一覧
 
 | Command | 説明 |
 |---------|-------------|
-| `ffhub [ffmpeg args]` | FFmpeg タスクを送信 |
-| `ffhub status <id>` | タスクの状態を確認 |
+| `ffhub [ffmpeg args]` | FFmpeg タスクを送信し、成果物をダウンロード |
+| `ffhub whoami` | 現在のアカウントとクレジット残高を表示 |
+| `ffhub list [--status=X] [--limit=N]` | 最近のタスクを一覧表示（デフォルト 10 件）。`ffhub ls` は別名 |
+| `ffhub status <id>` | タスクの状態を確認し、完了していれば成果物をダウンロード |
 | `ffhub config <key>` | API key を `~/.ffhub/config.json` に保存 |
-| `ffhub config` | 現在の API key を表示 |
-| `ffhub help` | ヘルプを表示 |
+| `ffhub config` | 現在の API key を表示（マスク済み） |
+| `ffhub help` | ヘルプを表示（`-h` / `--help` も可） |
+| `ffhub --version` | CLI のバージョンを表示（`-v` も可） |
 
 ## 必要要件
 
